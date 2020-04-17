@@ -1,0 +1,387 @@
+---
+title: "Time Series Analysis Project"
+author: "Steven Dougherty, Bao Khanh Cu, Zherui Liang, Jiyang Huang"
+date: "11/6/2019"
+output: html_document
+---
+# Libraries in use for this project
+```{r}
+library(fpp2)
+library(xts)
+library(tseries)
+library(fGarch)
+library(rugarch)
+library(Metrics)
+library(forecast)
+library(tsDyn)
+this.dir = dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(this.dir)
+```
+
+## Setup:
+
+Import Data set and transform into a time series
+
+```{r}
+SPclose<-read.csv("spx.csv",header = TRUE,sep = ",")
+SPclose[,1]<-as.Date(SPclose[,1], "%d-%b-%y")
+SP<- xts(SPclose[,-1], order.by=SPclose[,1])
+
+## Not the cleanest method for getting the first plot point from each month, but is sufficient to account for all non-trading days early in the month.
+SPmonthly<-c()
+for(i in 1986:2017){
+  for(j in 1:12){
+    FirstDay<-FALSE
+    if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-01",sep = "")
+    minSPmonth<-which(index(SP)==SPmonthlymin)
+    if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+    if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-02",sep = "")
+     minSPmonth<-which(index(SP)==SPmonthlymin)
+     if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+    if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-03",sep = "")
+     minSPmonth<-which(index(SP)==SPmonthlymin)
+     if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+    if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-04",sep = "")
+    minSPmonth<-which(index(SP)==SPmonthlymin)
+    if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+     if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-05",sep = "")
+    minSPmonth<-which(index(SP)==SPmonthlymin)
+    if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+    SPmonthly<-c(SPmonthly,minSPmonth)
+  }
+}
+i=2018
+for(j in 1:6){
+    FirstDay<-FALSE
+    if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-01",sep = "")
+    minSPmonth<-which(index(SP)==SPmonthlymin)
+    if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+    if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-02",sep = "")
+     minSPmonth<-which(index(SP)==SPmonthlymin)
+     if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+    if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-03",sep = "")
+     minSPmonth<-which(index(SP)==SPmonthlymin)
+     if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+    if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-04",sep = "")
+    minSPmonth<-which(index(SP)==SPmonthlymin)
+    if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+     if(FirstDay==FALSE){
+   SPmonthlymin<-paste(as.character(i),"-",as.character(j),"-05",sep = "")
+    minSPmonth<-which(index(SP)==SPmonthlymin)
+    if(any(index(SP)==SPmonthlymin)){FirstDay<-TRUE}
+    }
+    SPmonthly<-c(SPmonthly,minSPmonth)
+  }
+SPmonthly<-SP[SPmonthly,]
+
+```
+
+## Visualization of data:
+
+Plotting the ACF, PACF, and plot of our timeseries
+
+```{r}
+autoplot(SPmonthly)+ylab("S&P 500 Index Price")+xlab("Date")
+SP_log<-log(SPmonthly)
+ggtsdisplay(SP_log)
+```
+
+
+## Transformation:
+To make the data stationary, we will look at the log return.This is plotted along with its associated ACF and PACF below. The Augmented Dickey Fuller test returns a p-value of .01, indicating that this 
+
+
+```{r}
+SP_log<-as.ts(SP_log)
+adf.test(SP_log)
+# This data is not stationary, but a single difference will show stationarity
+adf.test(diff(SP_log))
+```
+Split into test and training, where test data takes up the last 18 months.
+```{r}
+SP_train_log<-window(SP_log, end = 378)
+SP_test_log<-window(SP_log, start = 379)
+```
+
+
+# Method 1: Time Series Linear Regression (ON log return)
+
+```{r}
+#data frame for tslm (log return)
+#creating a time series that is indexed with the same dates as SPmonthly
+SP_log_ret<-xts(rep(0,390),order.by =index(SPmonthly))
+SP_log_ret[1]<-0
+S<-SPmonthly%>%log()%>%diff()
+SP_log_ret[2:390]<-na.omit(S)
+## Importing our Predictors
+X<-read.csv('predictors.csv') #predictors
+X1<- xts(X[,-1], order.by=index(SPmonthly))
+train_log_ret<-window(SP_log_ret,end=c("2017-06-01")) 
+test_log_ret<-window(SP_log_ret, start=c("2017-07-03"))
+SP_log_ret_train<-ts(data.frame(SP_INDEX=train_log_ret,X[1:378,]))
+SP_log_ret_test<-ts(data.frame(SP_INDEX=test_log_ret,X[379:390,]))
+```
+
+
+```{r}
+#model comparison
+tslm(SP_INDEX ~ UNRATE+Usdollarindex+CPI+trend,data =SP_log_ret_train )%>%CV()
+tslm(SP_INDEX ~ UNRATE+Usdollarindex+crudeoil+trend,data =SP_log_ret_train )%>%CV()# best
+tslm(SP_INDEX ~ UNRATE+T_notes +crudeoil +trend,data =SP_log_ret_train )%>%CV()
+tslm(SP_INDEX ~ CPI+T_notes +crudeoil +trend,data =SP_log_ret_train )%>%CV()
+tslm(SP_INDEX ~ Usdollarindex+CPI+T_notes +trend,data =SP_log_ret_train )%>%CV()#best for logr
+tslm(SP_INDEX ~ Usdollarindex+CPI +crudeoil +trend,data =SP_log_ret_train )%>%CV()
+tslm(SP_INDEX ~ Usdollarindex+T_notes +crudeoil +trend,data =SP_log_ret_train )%>%CV()
+tslm(SP_INDEX ~ UNRATE+T_notes +crudeoil +trend,data =SP_log_ret_train )%>%CV()
+tslm(SP_INDEX ~ UNRATE+CPI +crudeoil +trend,data =SP_log_ret_train )%>%CV()
+tslm(SP_INDEX ~ UNRATE+CPI+T_notes +trend,data =SP_log_ret_train )%>%CV()
+tslm(formula = SP_INDEX ~ UNRATE + Usdollarindex + CPI + T_notes + 
+    crudeoil + trend, data = SP_log_ret_train)%>%CV() # full model
+
+```
+## Checking Residuals for best model
+```{r}
+fit1<-tslm(SP_INDEX ~ Usdollarindex+CPI+T_notes +trend,data =SP_log_ret_train )
+summary(fit1)
+checkresiduals(fit1)
+plot(fit1$fitted.values,SP_log_ret_train[,1],type='p',pch=16,cex=.2,main='Unemployment Rate + USD Index + T-note + CPI + trend') + abline(a=0,b=1,lwd=2,col='red')
+
+```
+```{r}
+#forecast error of log return
+newdata<-data.frame(DATE=SP_log_ret_test[,2],UNRATE=SP_log_ret_test[,3],Usdollarindex=SP_log_ret_test[,4],CPI=SP_log_ret_test[,5],T_notes=SP_log_ret_test[,6],crudeoil=SP_log_ret_test[,7])
+fit1_forecast<-forecast(fit1, newdata = newdata)
+forecast(fit1,newdata = data.frame(SP_log_ret_test),h=12)%>%autoplot()
+```
+
+```{r}
+#Back transformation
+tslmForecast<-rep(0,length(fit1_forecast$mean))
+final_value<- SP_log[378]
+tslmForecast[1] <- final_value+fit1_forecast$mean[1]
+for (i in 2:length(fit1_forecast$mean)) { 
+    tslmForecast[i] <- fit1_forecast$mean[i]+ tslmForecast[i-1]
+}
+#forecast error of transformed data
+tslmForecast<-as.ts(ts(tslmForecast,start = 379, end = 390))
+autoplot(as.ts(SP_log),include=50)+autolayer(tslmForecast)+ylim(7.5,8)+xlim(360,390)+ xlab("Month") +ylab("Log of Index Price")+theme(legend.position = "none")
+```
+
+
+
+
+# Method 2: ETS model:
+# Application of ETS, using both ets function and manually with a for loop to find lowest AICc
+```{r}
+
+ETS_AICc_matrix<-matrix(10^8,nrow=2,ncol=5)
+ETS_AICc_matrix[1,1]<-ets(SP_train_log,model = "ANN")$aicc
+ETS_AICc_matrix[1,2]<-ets(SP_train_log,model = "AAN",damped = FALSE)$aicc
+ETS_AICc_matrix[1,4]<-ets(SP_train_log,model = "AAN",damped = TRUE)$aicc
+ETS_AICc_matrix[2,1]<-ets(SP_train_log,model = "MNN")$aicc
+ETS_AICc_matrix[2,2]<-ets(SP_train_log,model = "MAN",damped = FALSE)$aicc
+ETS_AICc_matrix[2,3]<-ets(SP_train_log,model = "MMN",damped = FALSE)$aicc
+ETS_AICc_matrix[2,4]<-ets(SP_train_log,model = "MAN",damped = TRUE)$aicc
+ETS_AICc_matrix[2,5]<-ets(SP_train_log,model = "MMN",damped = TRUE)$aicc
+min(ETS_AICc_matrix)
+ETS_AICc_matrix
+ETS_AICc_matrix[1,2]
+##AAN same choice manually as 
+ETS_model<-ets(SP_train_log)
+
+```
+
+
+# Method 3: ARIMA model
+## Application of ARIMA, doing a manual gridsearch for the optimal ARIMA(p,d,q) 
+```{r}
+
+d<-ndiffs(SP_train_log)
+ARIMA_AICc_matrix<-matrix(0,nrow=6,ncol=6)
+for(i in 1:6){
+  for(j in 1:6){
+    ARIMA_AICc_matrix[i,j]<-Arima(SP_train_log, order = c(i-1,d,j-1),include.drift = TRUE)$aicc
+  }
+}
+ARIMA_AICc_matrix
+min(ARIMA_AICc_matrix)
+Arima_model<-auto.arima(SP_train_log, stepwise = FALSE, approximation = FALSE)
+Arima_model$aicc
+## ARIMA(1,1,1) is the best model (with draft)
+Arima(SP_train_log, order = c(1,1,1),include.drift = TRUE)$aicc
+```
+
+##Check residulas of models with lowest AICc
+ARIMA on full dataset, still have to split data into training and test 
+
+```{r}
+ETS_model<-ets(SP_train_log)
+Arima_model<-auto.arima(SP_train_log, stepwise = FALSE, approximation = FALSE)
+holtmod<-holt(SP_train_log,h=12,drift = TRUE)
+ETS_model %>% forecast(h=40) %>% autoplot(PI=F)+autolayer(SP_test_log)+ xlab("Month") +ylab("Log of Index Price")+ylim(7.5,8)+xlim(360,390)+theme(legend.position = "none")
+Arima_model %>% forecast(h=40) %>% autoplot(PI=F)+autolayer(SP_test_log)+ xlab("Month") +ylab("Log of Index Price")+ ylim(7.5,8)+xlim(360,390)+theme(legend.position = "none")
+
+### Checking Residuals
+
+checkresiduals(Arima_model)
+ggAcf(Arima_model$residuals^2)
+checkresiduals(ETS_model)
+
+```
+
+
+#Method 4: GARCH model
+### GARCH Model
+```{r}
+##GARCH
+fitgarch<-garchFit(~arma(1,1)+garch(1,1),diff(SP_train_log)[-1],trace=F)
+summary(fitgarch)
+garch.predict<- predict(fitgarch,12)
+garch.predict$meanForecast
+checkresiduals(fitgarch@residuals)
+Box.test(fitgarch@residuals)
+
+
+
+final_value<- SP_train_log[length(SP_train_log)]
+garch.predict$meanForecast[1] <- final_value+garch.predict$meanForecast[1]
+for (i in 2:12) { 
+    garch.predict$meanForecast[i] <- garch.predict$meanForecast[i]+ garch.predict$meanForecast[i-1]
+  
+  }
+```
+
+```{r} 
+plot.garch<-ts(garch.predict$meanForecast, start = 379, end = 390)
+autoplot(as.ts(plot.garch))+ xlab("Month")+autolayer(as.ts(SP_log)) + ylab("Log of Index Price")+ylim(7.5,8)+xlim(360,390)+theme(legend.position = "none")
+```
+
+#Method 5: Neural network
+
+
+```{r}
+set.seed(1)
+neural<- nnetar(SP_train_log, p = 12, size = 6)
+neural.forecast <- forecast(neural, h = 12)
+autoplot(neural.forecast) +autolayer(as.ts(SP_log)) + xlab("Month") +ylab("Log of Index Price")+ylim(7.5,8)+xlim(360,390)+theme(legend.position = "none")
+
+```
+
+### Neural Network alternative
+```{r}
+set.seed(1)
+nnet<- nnetTs(SP_train_log, m=8, size=6)
+nnet.predict<-predict(nnet,n.ahead=12)
+autoplot(nnet.predict) +autolayer(as.ts(SP_log)) + xlab("Month") +ylab("Log of Index Price")+ylim(7.5,8.25)+xlim(360,390)+theme(legend.position = "none")
+AIC(nnet)
+
+```
+
+#Method 6: SETAR model
+```{r}
+
+fit.setar<-setar(train_log_ret,m=2,thDelay = 1)
+fit.setar
+pred.setar <- predict(fit.setar,n.ahead=12)
+pred.setar[1]<-pred.setar[1]+SP_train_log[378]
+for (i in 2:12){
+  pred.setar[i]<-pred.setar[i]+pred.setar[i-1]
+}
+pred.setar
+sum((pred.setar -  SP_test_log)^2) 
+AIC(fit.setar)
+checkresiduals(fit.setar$residuals)
+Box.test(fit.setar$residuals,lag=10,type='Ljung')
+autoplot(SP_log)+autolayer(pred.setar)+ xlab("Month") +ylab("Log of Index Price")+ylim(7.5,8)+xlim(360,390)+theme(legend.position = "none")
+
+```
+
+## Checking AIC
+```{r}
+
+#ETS
+AIC_ETS<-ETS_model$aicc
+AIC_ETS
+
+#ARIMA
+AIC_Arima<-Arima_model$aicc
+AIC_Arima
+
+#GARCH
+AIC_Garch<-fitgarch@fit$ics[1]*length(SP_train_log)
+AIC_Garch
+
+# #Neural
+AIC_NN<-AIC(nnet)
+AIC_NN
+
+## SETAR
+AIC_SETAR<-AIC(fit.setar)
+AIC_SETAR
+
+```
+### Checking Fit For All Models
+```{r}
+# TSLM
+# forecast::accuracy(tslmForecast,SP_test_log) %>% round(4)
+MSE_TSLM<-sum((tslmForecast-SP_test_log)^2)
+MSE_TSLM
+
+#ETS
+# ETS_model %>% forecast(h=12) %>%forecast::accuracy(SP_test_log) %>% round(4)
+fETS<-forecast(ETS_model,h=12)
+MSE_ETS<-sum((fETS$mean-SP_test_log)^2)
+MSE_ETS
+
+#ARIMA
+# Arima_model %>% forecast(h=12) %>% forecast::accuracy(SP_test_log) %>% round(4)
+fArima<-forecast(Arima_model,h=12)
+MSE_Arima<-sum((fArima$mean-SP_test_log)^2)
+MSE_Arima
+
+#GARCH
+# forecast::accuracy(ts(SP_test_log, start=379, end=390),plot.garch)%>%round(4)
+MSE_Garch<-sum((plot.garch-SP_test_log)^2)
+MSE_Garch
+
+# #Neural
+# forecast::accuracy(neural.forecast, SP_test_log)%>% round(4)
+MSE_NN<-sum((nnet.predict-SP_test_log)^2) 
+MSE_NN
+
+## SETAR
+MSE_SETAR<-sum((pred.setar-SP_test_log)^2)
+MSE_SETAR
+
+```
+## SETAR has the lowest test errors of the three models presented here.
+
+
+### Graph of Test Data with all models
+```{r}
+dat.predict<-data.frame(Time<-index(SPmonthly[379:390]),actual<-SP_test_log,TSLM<-tslmForecast,ETS<-fETS$mean,ARIMA<-fArima$mean,NN<-nnet.predict,GARCH<-plot.garch,SETAR<-pred.setar)
+
+ggplot(dat.predict, mapping=aes(x=Time))+geom_line(mapping=aes(y=actual))+geom_line(mapping=aes(y=TSLM))+geom_line(mapping=aes(y=ETS))+geom_line(mapping=aes(y=ARIMA))+geom_line(mapping=aes(y=NN))+geom_line(mapping=aes(y=GARCH))+geom_line(mapping=aes(y=SETAR))
+```
+
+
+
+
